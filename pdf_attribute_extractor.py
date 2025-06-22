@@ -62,51 +62,26 @@ def find_best_match(attr_name, lines, tables):
     attr_clean = clean_text(attr_name)
     best_score = 0
     best_value = "Not found"
-    best_line_idx = -1
 
-    # 1. Search in tables (row-wise, header-aware)
-    for table in tables:
-        if not table or len(table) < 2:
-            continue
-        headers = [clean_text(cell) if cell else "" for cell in table[0]]
-        for row in table[1:]:
-            for i, cell in enumerate(row):
-                if not cell:
-                    continue
-                cell_clean = clean_text(cell)
-                score = fuzz.partial_ratio(attr_clean, cell_clean)
-                if score >= 85:
-                    # If table has headers and this is a header row
-                    if i+1 < len(row) and row[i+1]:
-                        return row[i+1].strip()
-                    # If table is key-value
-                    elif len(row) == 2:
-                        return row[1-i].strip() if i == 0 else row[0].strip()
-                    # Try to use header mapping
-                    elif headers and i < len(headers) and headers[i] == attr_clean:
-                        # Find value in the same column
-                        return row[i].strip()
-
-    # 2. Search in lines (regex for value after attribute)
-    for idx, line in enumerate(lines):
-        line_clean = clean_text(line)
-        score = fuzz.partial_ratio(attr_clean, line_clean)
-        if score > best_score:
-            best_score = score
-            best_line_idx = idx
-            # Try to extract value after attribute name
-            pattern = re.compile(rf"{re.escape(attr_clean)}[\s:]*([\w\-\.\/%]+)", re.IGNORECASE)
-            match = pattern.search(line_clean)
-            if match:
-                best_value = match.group(1)
-            elif ':' in line:
-                best_value = line.split(':', 1)[-1].strip()
-            else:
-                best_value = line.strip()
-
-    if best_score >= 70:
-        return best_value
-    return "Not found"
+    # Special handling for EN 388 attributes
+    if attr_clean.startswith("en 388"):
+        pattern = re.compile(r"en[\\s-]?388[\\s:]*([\\d]+)?", re.IGNORECASE)
+        for line in lines:
+            if pattern.search(line):
+                # Try to extract numbers after EN 388
+                numbers = re.findall(r"\\d+", line)
+                if numbers:
+                    return ' '.join(numbers)
+        # Try in tables as well
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if cell and pattern.search(cell):
+                        numbers = re.findall(r"\\d+", cell)
+                        if numbers:
+                            return ' '.join(numbers)
+        return "Not found"
+    # ...rest of your matching logic...
 
 # --- Improved GPT Fallback Context ---
 def get_gpt_context(attr, lines):
@@ -148,6 +123,16 @@ if pdf_file and attributes:
         tables = extract_text_from_tables(pdf_file)
 
     st.success("✅ Extraction complete!")
+
+    # --- Debug Output: Show first 50 lines and first 3 tables ---
+    with st.expander("🛠️ Show Raw Extracted Lines & Tables (Debug)"):
+        st.markdown("#### First 50 Extracted Lines:")
+        for i, line in enumerate(lines[:50]):
+            st.write(f"{i+1}: {line}")
+        st.markdown("#### First 3 Extracted Tables:")
+        for t_idx, table in enumerate(tables[:3]):
+            st.write(f"Table {t_idx+1}:")
+            st.table(table)
 
     results = []
     st.markdown("### 📋 Extracted Results:")
