@@ -4,6 +4,7 @@ import pdfplumber
 import pandas as pd
 from fuzzywuzzy import fuzz
 import openai
+import re
 
 st.set_page_config(page_title="🔍 Smart Datasheet Attribute Extractor", layout="centered")
 st.title("🧠 Smart Datasheet Attribute Extractor")
@@ -29,7 +30,6 @@ use_gpt = bool(openai_key)
 
 # --- Text Cleaning & Normalization ---
 def clean_text(text):
-    import re
     text = text.lower()
     text = re.sub(r"[\t\r]+", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -58,7 +58,6 @@ def extract_text_lines_mupdf(pdf):
 
 # --- Improved Attribute Matching ---
 def find_best_match(attr_name, lines, tables):
-    import re
     attr_clean = clean_text(attr_name)
     best_score = 0
     best_value = "Not found"
@@ -148,3 +147,28 @@ if pdf_file and attributes:
     if results:
         df = pd.DataFrame(results)
         st.download_button("📤 Download as Excel", data=df.to_excel(index=False), file_name="attribute_results.xlsx")
+
+def extract_from_main_table(attr_name, tables):
+    # Try to find the main table with headers
+    for table in tables:
+        if not table or len(table) < 2:
+            continue
+        headers = [clean_text(cell) if cell else "" for cell in table[0]]
+        values = table[1]
+        # Fuzzy match attribute to header
+        best_score = 0
+        best_idx = -1
+        for i, header in enumerate(headers):
+            score = fuzz.partial_ratio(clean_text(attr_name), header)
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_score > 70 and best_idx != -1 and best_idx < len(values):
+            return values[best_idx]
+    return None
+
+def extract_en388(lines):
+    for line in lines:
+        if re.match(r'^[0-9X]{4,5}[A-D]$', line.strip()):
+            return line.strip()
+    return None
