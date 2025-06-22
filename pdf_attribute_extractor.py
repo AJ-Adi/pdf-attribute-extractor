@@ -4,7 +4,6 @@ import pdfplumber
 import pandas as pd
 from fuzzywuzzy import fuzz
 import openai
-import re
 
 st.set_page_config(page_title="🔍 Smart Datasheet Attribute Extractor", layout="centered")
 st.title("🧠 Smart Datasheet Attribute Extractor")
@@ -25,11 +24,12 @@ attributes_input = st.text_area("✍️ Enter Attribute Names (one per line):", 
 attributes = [attr.strip() for attr in attributes_input.split("\n") if attr.strip()]
 
 # Optional GPT key
-openai_key = st.text_input("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", type="password")
+openai_key = st.text_input("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", type="password")
 use_gpt = bool(openai_key)
 
 # --- Text Cleaning & Normalization ---
 def clean_text(text):
+    import re
     text = text.lower()
     text = re.sub(r"[\t\r]+", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -58,29 +58,64 @@ def extract_text_lines_mupdf(pdf):
 
 # --- Improved Attribute Matching ---
 def find_best_match(attr_name, lines, tables):
+    import re
     attr_clean = clean_text(attr_name)
     best_score = 0
     best_value = "Not found"
+    best_line_idx = -1
 
-    # Special handling for EN 388 attributes
-    if attr_clean.startswith("en 388"):
-        pattern = re.compile(r"en[\\s-]?388[\\s:]*([\\d]+)?", re.IGNORECASE)
+    # --- Special handling for EN 388 attributes ---
+    en388_labels = {
+        "en 388 abrasion": 0,
+        "en 388 blade": 1,
+        "en 388 tear": 2,
+        "en 388 puncture": 3,
+    }
+    if attr_clean in en388_labels:
+        # Look for EN 388 code in lines (e.g., 4X43D)
+        code_pattern = re.compile(r"\b[0-9X]{1}[0-9X]{1}[0-9X]{1}[0-9X]{1}[A-Z]?(?![A-Za-z0-9])")
         for line in lines:
-            if pattern.search(line):
-                # Try to extract numbers after EN 388
-                numbers = re.findall(r"\\d+", line)
-                if numbers:
-                    return ' '.join(numbers)
-        # Try in tables as well
-        for table in tables:
-            for row in table:
-                for cell in row:
-                    if cell and pattern.search(cell):
-                        numbers = re.findall(r"\\d+", cell)
-                        if numbers:
-                            return ' '.join(numbers)
+            match = code_pattern.search(line)
+            if match:
+                code = match.group(0)
+                idx = en388_labels[attr_clean]
+                if idx < len(code):
+                    return code[idx]
         return "Not found"
-    # ...rest of your matching logic...
+
+    # --- Table extraction: match attribute to header ---
+    for table in tables:
+        if not table or len(table) < 2:
+            continue
+        headers = [clean_text(str(cell)) if cell else "" for cell in table[0]]
+        for row in table[1:]:
+            for i, header in enumerate(headers):
+                score = fuzz.partial_ratio(attr_clean, header)
+                if score >= 80 and i < len(row):
+                    value = row[i]
+                    if value:
+                        return str(value).strip()
+
+    # --- Fallback: search in lines (regex for value after attribute) ---
+    for idx, line in enumerate(lines):
+        line_clean = clean_text(line)
+        score = fuzz.partial_ratio(attr_clean, line_clean)
+        if score > best_score:
+            best_score = score
+            best_line_idx = idx
+            # Try to extract value after attribute name
+            pattern = re.compile(rf"{re.escape(attr_clean)}[\s:]*([\w\-\.\/%]+)", re.IGNORECASE)
+            match = pattern.search(line_clean)
+            if match:
+                best_value = match.group(1)
+            elif ':' in line:
+                best_value = line.split(':', 1)[-1].strip()
+            else:
+                best_value = line.strip()
+
+    if best_score >= 70:
+        return best_value
+    return "Not found"
 
 # --- Improved GPT Fallback Context ---
 def get_gpt_context(attr, lines):
@@ -147,28 +182,3 @@ if pdf_file and attributes:
     if results:
         df = pd.DataFrame(results)
         st.download_button("📤 Download as Excel", data=df.to_excel(index=False), file_name="attribute_results.xlsx")
-
-def extract_from_main_table(attr_name, tables):
-    # Try to find the main table with headers
-    for table in tables:
-        if not table or len(table) < 2:
-            continue
-        headers = [clean_text(cell) if cell else "" for cell in table[0]]
-        values = table[1]
-        # Fuzzy match attribute to header
-        best_score = 0
-        best_idx = -1
-        for i, header in enumerate(headers):
-            score = fuzz.partial_ratio(clean_text(attr_name), header)
-            if score > best_score:
-                best_score = score
-                best_idx = i
-        if best_score > 70 and best_idx != -1 and best_idx < len(values):
-            return values[best_idx]
-    return None
-
-def extract_en388(lines):
-    for line in lines:
-        if re.match(r'^[0-9X]{4,5}[A-D]$', line.strip()):
-            return line.strip()
-    return None
