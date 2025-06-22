@@ -1,3 +1,6 @@
 streamlit
 PyMuPDF
+pdfplumber
 fuzzywuzzy
+openai
+pandas
