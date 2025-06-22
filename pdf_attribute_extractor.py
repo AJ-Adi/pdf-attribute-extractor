@@ -24,7 +24,7 @@ attributes_input = st.text_area("✍️ Enter Attribute Names (one per line):", 
 attributes = [attr.strip() for attr in attributes_input.split("\n") if attr.strip()]
 
 # Optional GPT key
-openai_key = st.text_input("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", type="password")
+openai_key = st.text_input("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", type="password")
 use_gpt = bool(openai_key)
 
 # --- Text Cleaning & Normalization ---
